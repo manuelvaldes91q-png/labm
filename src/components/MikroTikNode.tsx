@@ -9,6 +9,7 @@ export type MikroTikNodeData = Record<string, unknown> & DeviceModel & {
   containerStatus?: string;
   wanIp?: string;
   winboxPort?: number;
+  rosBooted?: boolean;
 };
 
 function MikroTikNode({ data, selected }: NodeProps) {
@@ -97,6 +98,14 @@ function MikroTikNode({ data, selected }: NodeProps) {
         <div className="flex items-center gap-1 mt-0.5">
           <span className="text-[9px] text-indigo-400 font-mono">
             Winbox: :{d.winboxPort}
+          </span>
+        </div>
+      )}
+
+      {!isPc && d.containerStatus === "running" && (
+        <div className="flex items-center gap-1 mt-0.5">
+          <span className={`text-[9px] font-mono ${d.rosBooted ? "text-emerald-400" : "text-yellow-500"}`}>
+            {d.rosBooted ? "RouterOS ready" : "Booting RouterOS..."}
           </span>
         </div>
       )}

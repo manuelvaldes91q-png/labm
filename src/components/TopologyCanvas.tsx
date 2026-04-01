@@ -19,7 +19,7 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import type { DeviceModel } from "@/lib/mikrotik-models";
-import { connectNodes, createNode, deleteNode, deleteConnection } from "@/lib/api";
+import { connectNodes, createNode, deleteNode, deleteConnection, getNode } from "@/lib/api";
 import MikroTikNode, { type MikroTikNodeData } from "@/components/MikroTikNode";
 import Terminal from "@/components/Terminal";
 
@@ -51,6 +51,32 @@ function FlowCanvas() {
     setStatusMsg(msg);
     setTimeout(() => setStatusMsg(""), durationMs);
   }, []);
+
+  const pollRosBoot = useCallback(
+    (nodeId: string, containerName: string) => {
+      const interval = setInterval(async () => {
+        try {
+          const data = await getNode(containerName);
+          if (data.ros_booted) {
+            clearInterval(interval);
+            setNodes((nds) =>
+              nds.map((n) =>
+                n.id === nodeId
+                  ? { ...n, data: { ...n.data, rosBooted: true } }
+                  : n,
+              ),
+            );
+            showStatus(`RouterOS ready on ${containerName}`);
+          }
+        } catch {
+          /* still booting */
+        }
+      }, 5000);
+
+      setTimeout(() => clearInterval(interval), 130000);
+    },
+    [setNodes, showStatus],
+  );
 
   const onConnect: OnConnect = useCallback(
     async (connection: Connection) => {
@@ -164,6 +190,7 @@ function FlowCanvas() {
                     containerStatus: "running",
                     wanIp: resp.wan_ip ?? undefined,
                     winboxPort: resp.winbox_port ?? undefined,
+                    rosBooted: resp.ros_booted,
                   },
                 }
               : n,
@@ -175,6 +202,10 @@ function FlowCanvas() {
         showStatus(
           `${model.name} provisioned${extras.length ? ` (${extras.join(", ")})` : ""}`,
         );
+
+        if (model.node_type !== "pc") {
+          pollRosBoot(nodeId, containerName);
+        }
       } catch (err) {
         setNodes((nds) =>
           nds.map((n) =>
@@ -193,7 +224,7 @@ function FlowCanvas() {
         showStatus(`Error provisioning ${model.name}: ${msg}`);
       }
     },
-    [screenToFlowPosition, setNodes, showStatus],
+    [screenToFlowPosition, setNodes, showStatus, pollRosBoot],
   );
 
   const onNodeClick = useCallback(
