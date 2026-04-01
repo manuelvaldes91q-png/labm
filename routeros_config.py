@@ -141,6 +141,32 @@ def auto_configure(host_ip: str) -> dict:
     except Exception as e:
         results["nat"] = f"error: {e}"
 
+    try:
+        ros_post(host_ip, "ip/firewall/filter/add", {
+            "chain": "input",
+            "action": "accept",
+            "protocol": "tcp",
+            "dst-port": "8291",
+            "comment": "Allow WinBox",
+        })
+        ros_post(host_ip, "ip/firewall/filter/add", {
+            "chain": "input",
+            "action": "accept",
+            "protocol": "tcp",
+            "dst-port": "80",
+            "comment": "Allow HTTP API",
+        })
+        ros_post(host_ip, "ip/firewall/filter/add", {
+            "chain": "input",
+            "action": "accept",
+            "protocol": "tcp",
+            "dst-port": "443",
+            "comment": "Allow HTTPS API",
+        })
+        results["firewall"] = "configured"
+    except Exception as e:
+        results["firewall"] = f"error: {e}"
+
     return results
 
 
