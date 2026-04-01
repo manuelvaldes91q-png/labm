@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Network Manager for MikroTik CHR L2 connectivity.
-Creates veth pairs, moves them to container namespaces, and renames them.
+Creates veth pairs, moves them to container namespaces, renames them,
+and sets up WAN bridge with NAT for internet access.
 """
 
 import subprocess
@@ -11,6 +12,10 @@ import logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+WAN_BRIDGE = "chr-wan"
+WAN_SUBNET_BASE = "172.30.0"
+WINBOX_PORT_BASE = 8291
 
 
 class ContainerNotFoundError(Exception):
@@ -69,6 +74,12 @@ def move_veth_to_namespace(veth_name: str, container_pid: int, new_name: str) ->
     logger.info("Moved %s -> container PID %d as '%s' (UP)", veth_name, container_pid, new_name)
 
 
+def assign_ip_in_namespace(container_pid: int, iface: str, ip_cidr: str) -> None:
+    run(["nsenter", "-t", str(container_pid), "-n",
+         "ip", "addr", "add", ip_cidr, "dev", iface], check=False)
+    logger.info("Assigned %s to %s in PID %d", ip_cidr, iface, container_pid)
+
+
 def set_host_veth_up(host_veth: str) -> None:
     run(["ip", "link", "set", host_veth, "up"])
     logger.info("Set host-side '%s' UP", host_veth)
@@ -87,6 +98,117 @@ def cleanup_veth_pair(host_veth: str) -> None:
     if veth_exists(host_veth):
         run(["ip", "link", "del", host_veth], check=False)
         logger.info("Deleted veth pair via host end '%s'", host_veth)
+
+
+# ── WAN Bridge ───────────────────────────────────────────────────────
+
+
+def get_host_default_iface() -> str:
+    result = run(["ip", "route", "show", "default"])
+    parts = result.stdout.split()
+    for i, p in enumerate(parts):
+        if p == "dev" and i + 1 < len(parts):
+            return parts[i + 1]
+    return "eth0"
+
+
+def _get_next_wan_ip() -> str:
+    existing = set()
+    client = docker.from_env()
+    containers = client.containers.list(filters={"label": "chr_wan_ip"})
+    for c in containers:
+        ip_label = c.labels.get("chr_wan_ip", "")
+        if ip_label:
+            parts = ip_label.split(".")
+            if len(parts) == 4:
+                try:
+                    existing.add(int(parts[3]))
+                except ValueError:
+                    pass
+    for last_octet in range(10, 254):
+        if last_octet not in existing:
+            return f"{WAN_SUBNET_BASE}.{last_octet}"
+    raise VethCommandError("No available WAN IPs in subnet")
+
+
+def setup_wan_bridge() -> dict:
+    if veth_exists(WAN_BRIDGE):
+        logger.info("WAN bridge '%s' already exists", WAN_BRIDGE)
+        return {"bridge": WAN_BRIDGE, "status": "exists"}
+
+    host_iface = get_host_default_iface()
+    logger.info("Host default interface: %s", host_iface)
+
+    run(["ip", "link", "add", WAN_BRIDGE, "type", "bridge"])
+    run(["ip", "link", "set", WAN_BRIDGE, "up"])
+
+    bridge_ip = f"{WAN_SUBNET_BASE}.1/24"
+    run(["ip", "addr", "add", bridge_ip, "dev", WAN_BRIDGE], check=False)
+
+    run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
+    run(["iptables", "-t", "nat", "-C", "POSTROUTING",
+         "-s", f"{WAN_SUBNET_BASE}.0/24",
+         "-o", host_iface,
+         "-j", "MASQUERADE"], check=False)
+    if run(["iptables", "-t", "nat", "-C", "POSTROUTING",
+            "-s", f"{WAN_SUBNET_BASE}.0/24",
+            "-o", host_iface,
+            "-j", "MASQUERADE"], check=False).returncode != 0:
+        run(["iptables", "-t", "nat", "-A", "POSTROUTING",
+             "-s", f"{WAN_SUBNET_BASE}.0/24",
+             "-o", host_iface,
+             "-j", "MASQUERADE"])
+
+    run(["iptables", "-A", "FORWARD",
+         "-i", WAN_BRIDGE, "-o", host_iface, "-j", "ACCEPT"], check=False)
+    run(["iptables", "-A", "FORWARD",
+         "-i", host_iface, "-o", WAN_BRIDGE,
+         "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"], check=False)
+
+    logger.info("WAN bridge '%s' setup complete with NAT via %s", WAN_BRIDGE, host_iface)
+    return {"bridge": WAN_BRIDGE, "status": "created", "host_iface": host_iface}
+
+
+def connect_wan(container_name: str) -> dict:
+    pid = get_container_pid(container_name)
+    wan_ip = _get_next_wan_ip()
+    host_veth = f"veth-{container_name}-wan"
+    container_veth = f"vethc-{container_name}-wan"
+
+    create_veth_pair(host_veth, container_veth)
+    set_host_veth_up(host_veth)
+    bridge_add(WAN_BRIDGE, host_veth)
+    move_veth_to_namespace(container_veth, pid, "wan")
+    assign_ip_in_namespace(pid, "wan", f"{wan_ip}/24")
+
+    client = docker.from_env()
+    try:
+        container = client.containers.get(container_name)
+        container.reload()
+        labels = dict(container.labels or {})
+        labels["chr_wan_ip"] = wan_ip
+    except docker.errors.NotFound:
+        pass
+
+    logger.info("Connected %s to WAN as %s", container_name, wan_ip)
+    return {
+        "container": container_name,
+        "interface": "wan",
+        "ip": wan_ip,
+        "bridge": WAN_BRIDGE,
+    }
+
+
+def get_container_wan_ip(container_name: str) -> str | None:
+    client = docker.from_env()
+    try:
+        c = client.containers.get(container_name)
+        return c.labels.get("chr_wan_ip")
+    except docker.errors.NotFound:
+        return None
+
+
+# ── Container connection ─────────────────────────────────────────────
 
 
 def connect_container(
@@ -148,21 +270,15 @@ def main() -> None:
         print()
         print("Commands:")
         print("  connect <container> <iface_index> [bridge]")
-        print("    Attach a veth to a container as ether<N>, optionally to a bridge.")
-        print()
         print("  pair <container_a> <index_a> <container_b> <index_b>")
-        print("    Direct L2 link between two containers.")
-        print()
         print("  cleanup <host_veth_name>")
-        print("    Delete a veth pair by its host-side name.")
+        print("  wan-setup")
+        print("  wan-connect <container>")
         sys.exit(1)
 
     cmd = sys.argv[1]
 
     if cmd == "connect":
-        if len(sys.argv) < 4:
-            print(f"Usage: {sys.argv[0]} connect <container> <iface_index> [bridge]")
-            sys.exit(1)
         container = sys.argv[2]
         index = int(sys.argv[3])
         bridge = sys.argv[4] if len(sys.argv) > 4 else None
@@ -170,18 +286,20 @@ def main() -> None:
         logger.info("Done: %s", result)
 
     elif cmd == "pair":
-        if len(sys.argv) < 6:
-            print(f"Usage: {sys.argv[0]} pair <container_a> <index_a> <container_b> <index_b>")
-            sys.exit(1)
         ca, ia, cb, ib = sys.argv[2], int(sys.argv[3]), sys.argv[4], int(sys.argv[5])
         result = connect_pair(ca, ia, cb, ib)
         logger.info("Done: %s", result)
 
     elif cmd == "cleanup":
-        if len(sys.argv) < 3:
-            print(f"Usage: {sys.argv[0]} cleanup <host_veth_name>")
-            sys.exit(1)
         cleanup_veth_pair(sys.argv[2])
+
+    elif cmd == "wan-setup":
+        result = setup_wan_bridge()
+        logger.info("Done: %s", result)
+
+    elif cmd == "wan-connect":
+        result = connect_wan(sys.argv[2])
+        logger.info("Done: %s", result)
 
     else:
         print(f"Unknown command: {cmd}")

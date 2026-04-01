@@ -1,14 +1,14 @@
-export interface MikroTikModel {
+export interface DeviceModel {
   id: string;
   name: string;
   series: string;
   ports: number;
   description: string;
   color: string;
-  node_type: "router" | "switch";
+  node_type: "router" | "switch" | "pc";
 }
 
-export const MIKROTIK_MODELS: MikroTikModel[] = [
+export const MIKROTIK_MODELS: DeviceModel[] = [
   {
     id: "rb4011",
     name: "RB4011iGS+",
@@ -74,6 +74,28 @@ export const MIKROTIK_MODELS: MikroTikModel[] = [
   },
 ];
 
-export function getModelById(id: string): MikroTikModel | undefined {
-  return MIKROTIK_MODELS.find((m) => m.id === id);
+export const PC_MODELS: DeviceModel[] = [
+  {
+    id: "pc-alpine",
+    name: "Linux PC",
+    series: "Alpine",
+    ports: 1,
+    description: "Alpine Linux with iproute2, curl, iputils",
+    color: "#f59e0b",
+    node_type: "pc",
+  },
+];
+
+export const WAN_MODEL: DeviceModel = {
+  id: "wan-cloud",
+  name: "Internet / WAN",
+  series: "Cloud",
+  ports: 0,
+  description: "NAT gateway via host — auto-connects to all nodes",
+  color: "#6366f1",
+  node_type: "router",
+};
+
+export function getModelById(id: string): DeviceModel | undefined {
+  return [...MIKROTIK_MODELS, ...PC_MODELS, WAN_MODEL].find((m) => m.id === id);
 }

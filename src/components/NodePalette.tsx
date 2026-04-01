@@ -1,14 +1,16 @@
 "use client";
 
 import { type DragEvent } from "react";
-import { MIKROTIK_MODELS, type MikroTikModel } from "@/lib/mikrotik-models";
+import {
+  MIKROTIK_MODELS,
+  PC_MODELS,
+  WAN_MODEL,
+  type DeviceModel,
+} from "@/lib/mikrotik-models";
 
-function DraggableModel({ model }: { model: MikroTikModel }) {
+function DraggableModel({ model }: { model: DeviceModel }) {
   const onDragStart = (e: DragEvent) => {
-    e.dataTransfer.setData(
-      "application/reactflow",
-      JSON.stringify(model),
-    );
+    e.dataTransfer.setData("application/reactflow", JSON.stringify(model));
     e.dataTransfer.effectAllowed = "move";
   };
 
@@ -28,7 +30,8 @@ function DraggableModel({ model }: { model: MikroTikModel }) {
         </span>
       </div>
       <div className="text-[11px] text-neutral-500 mt-0.5 ml-[18px]">
-        {model.series} · {model.ports} ports
+        {model.series}
+        {model.ports > 0 && <> · {model.ports} ports</>}
       </div>
     </div>
   );
@@ -62,11 +65,40 @@ export default function NodePalette() {
         </div>
       </div>
 
-      <div className="mt-auto pt-4 border-t border-neutral-800">
-        <p className="text-[11px] text-neutral-600 leading-relaxed">
-          Drag a device onto the canvas to add it. Connect two handles to
-          create a veth link. The backend will provision the real L2
-          connection.
+      <div>
+        <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">
+          PCs
+        </h2>
+        <div className="flex flex-col gap-1.5">
+          {PC_MODELS.map((m) => (
+            <DraggableModel key={m.id} model={m} />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">
+          WAN
+        </h2>
+        <DraggableModel model={WAN_MODEL} />
+        <p className="text-[10px] text-neutral-600 mt-1 ml-0.5">
+          Each node auto-connects to WAN via NAT on creation.
+        </p>
+      </div>
+
+      <div className="mt-auto pt-4 border-t border-neutral-800 space-y-2">
+        <div>
+          <p className="text-[11px] text-neutral-400 font-medium">
+            Winbox Access
+          </p>
+          <p className="text-[10px] text-neutral-600 leading-relaxed">
+            Routers and switches get a unique Winbox port. Connect with{" "}
+            <code className="text-indigo-400">{"<host-ip>:<port>"}</code>.
+          </p>
+        </div>
+        <p className="text-[10px] text-neutral-600 leading-relaxed">
+          Drag a device onto the canvas. Connect two handles to create a veth
+          link. PCs can verify configs with ping/curl via WAN.
         </p>
       </div>
     </aside>

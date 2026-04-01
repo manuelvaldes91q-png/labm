@@ -18,7 +18,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import type { MikroTikModel } from "@/lib/mikrotik-models";
+import type { DeviceModel } from "@/lib/mikrotik-models";
 import { connectNodes, createNode, deleteNode, deleteConnection } from "@/lib/api";
 import MikroTikNode, { type MikroTikNodeData } from "@/components/MikroTikNode";
 import Terminal from "@/components/Terminal";
@@ -35,7 +35,7 @@ function nextId(): string {
   return `node_${nodeCounter}`;
 }
 
-function buildContainerName(model: MikroTikModel): string {
+function buildContainerName(model: DeviceModel): string {
   return `${model.id}-${Date.now().toString(36)}`;
 }
 
@@ -95,7 +95,7 @@ function FlowCanvas() {
         ),
       );
 
-      showStatus(`Linking ${sourceData.name} ↔ ${targetData.name}...`);
+      showStatus(`Linking ${sourceData.name} \u2194 ${targetData.name}...`);
 
       try {
         await connectNodes({
@@ -105,7 +105,7 @@ function FlowCanvas() {
           index_b: nextTargetIndex,
         });
         showStatus(
-          `Connected: ${sourceData.name}:ether${nextSourceIndex} ↔ ${targetData.name}:ether${nextTargetIndex}`,
+          `Connected: ${sourceData.name}:ether${nextSourceIndex} \u2194 ${targetData.name}:ether${nextTargetIndex}`,
         );
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Connection failed";
@@ -127,7 +127,7 @@ function FlowCanvas() {
       const raw = e.dataTransfer.getData("application/reactflow");
       if (!raw) return;
 
-      const model = JSON.parse(raw) as MikroTikModel;
+      const model = JSON.parse(raw) as DeviceModel;
       const position = screenToFlowPosition({
         x: e.clientX,
         y: e.clientY,
@@ -150,7 +150,7 @@ function FlowCanvas() {
       setNodes((nds) => [...nds, newNode]);
 
       try {
-        await createNode({
+        const resp = await createNode({
           name: containerName,
           node_type: model.node_type,
         });
@@ -162,12 +162,19 @@ function FlowCanvas() {
                   data: {
                     ...n.data,
                     containerStatus: "running",
+                    wanIp: resp.wan_ip ?? undefined,
+                    winboxPort: resp.winbox_port ?? undefined,
                   },
                 }
               : n,
           ),
         );
-        showStatus(`${model.name} provisioned as ${containerName}`);
+        const extras = [];
+        if (resp.wan_ip) extras.push(`WAN ${resp.wan_ip}`);
+        if (resp.winbox_port) extras.push(`Winbox :${resp.winbox_port}`);
+        showStatus(
+          `${model.name} provisioned${extras.length ? ` (${extras.join(", ")})` : ""}`,
+        );
       } catch (err) {
         setNodes((nds) =>
           nds.map((n) =>

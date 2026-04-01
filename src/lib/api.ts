@@ -17,6 +17,8 @@ interface NodeResponse {
   node_type: string;
   image: string;
   status: string;
+  wan_ip: string | null;
+  winbox_port: number | null;
 }
 
 interface ConnectionResponse {
@@ -24,6 +26,12 @@ interface ConnectionResponse {
   interface_a: string;
   node_b: string;
   interface_b: string;
+}
+
+interface WanStatusResponse {
+  bridge: string;
+  status: string;
+  host_interface: string | null;
 }
 
 async function request<T>(
@@ -52,6 +60,10 @@ export function listNodes() {
   return request<NodeResponse[]>("/nodes");
 }
 
+export function getNode(name: string) {
+  return request<NodeResponse>(`/nodes/${name}`);
+}
+
 export function connectNodes(payload: ConnectPayload) {
   return request<ConnectionResponse>("/connections", {
     method: "POST",
@@ -73,4 +85,12 @@ export function deleteNode(name: string) {
   return request<{ deleted: string }>(`/nodes/${name}`, {
     method: "DELETE",
   });
+}
+
+export function setupWan() {
+  return request<WanStatusResponse>("/wan/setup", { method: "POST" });
+}
+
+export function getWanStatus() {
+  return request<WanStatusResponse>("/wan/status");
 }
