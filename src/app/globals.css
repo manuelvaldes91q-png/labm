@@ -1,1 +1,49 @@
 @import "tailwindcss";
+
+/* xterm.js overrides */
+.xterm {
+  padding: 8px;
+}
+
+/* ReactFlow overrides */
+.react-flow__node {
+  cursor: grab;
+}
+
+.react-flow__node:active {
+  cursor: grabbing;
+}
+
+.react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+.react-flow__handle {
+  transition: background-color 150ms ease;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #404040;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #525252;
+}
+
+/* Prevent body scroll */
+html,
+body {
+  overflow: hidden;
+  height: 100%;
+}
