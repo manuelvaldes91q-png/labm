@@ -6,6 +6,7 @@ and full RouterOS configuration (VLANs, OSPF, BGP, DHCP, firewall).
 """
 
 import socket
+import time
 import asyncio
 import logging
 
@@ -36,6 +37,7 @@ PC_IMAGE = "alpine:latest"
 
 _winbox_counter = {"next": nm.WINBOX_PORT_BASE}
 _ros_boot_tasks: dict[str, asyncio.Task] = {}
+_ros_booted: dict[str, bool] = {}
 
 
 # ── Schemas ──────────────────────────────────────────────────────────
@@ -225,7 +227,7 @@ def _require_ros_ip(node_name: str) -> str:
 def _node_response(container: docker.models.containers.Container) -> NodeResponse:
     labels = container.labels or {}
     wan_ip = labels.get("chr_wan_ip")
-    ros_booted = labels.get("chr_ros_booted") == "true"
+    ros_booted = labels.get("chr_ros_booted") == "true" or _ros_booted.get(container.name, False)
     return NodeResponse(
         name=container.name,
         node_type=labels.get("chr_node_type", "unknown"),
@@ -241,16 +243,13 @@ async def _background_ros_boot(node_name: str, wan_ip: str) -> None:
     try:
         result = await asyncio.to_thread(ros.auto_configure, wan_ip)
         logger.info("Auto-configured %s: %s", node_name, result)
-        try:
-            container = docker_client.containers.get(node_name)
-            labels = dict(container.labels or {})
-            labels["chr_ros_booted"] = "true"
-        except docker.errors.NotFound:
-            pass
+        _ros_booted[node_name] = True
     except ros.RouterOSConnectionError as e:
         logger.error("RouterOS boot failed for %s: %s", node_name, e)
+        _ros_booted[node_name] = False
     except Exception as e:
         logger.error("Unexpected error during ROS boot for %s: %s", node_name, e)
+        _ros_booted[node_name] = False
 
 
 # ── WAN ──────────────────────────────────────────────────────────────
@@ -325,11 +324,20 @@ def create_node(req: CreateNodeRequest, background_tasks: BackgroundTasks):
         pass
 
     wan_ip = None
-    try:
-        wan_result = nm.connect_wan(req.name)
-        wan_ip = wan_result["ip"]
-    except (nm.VethCommandError, nm.ContainerNotFoundError, nm.ContainerNotRunningError):
-        pass
+    max_wan_retries = 3
+    for attempt in range(1, max_wan_retries + 1):
+        try:
+            wan_result = nm.connect_wan(req.name)
+            wan_ip = wan_result["ip"]
+            logger.info("WAN connected for %s on attempt %d: %s", req.name, attempt, wan_ip)
+            break
+        except (nm.VethCommandError, nm.ContainerNotFoundError, nm.ContainerNotRunningError) as e:
+            logger.warning("WAN connection attempt %d failed for %s: %s", attempt, req.name, e)
+            if attempt < max_wan_retries:
+                time.sleep(2)
+
+    if not wan_ip:
+        logger.error("All WAN connection attempts failed for %s - RouterOS will not boot", req.name)
 
     if wan_ip and req.node_type in ("router", "switch"):
         background_tasks.add_task(_background_ros_boot, req.name, wan_ip)

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 ROS_USER = "admin"
 ROS_PASS = ""
 ROS_API_PORT = 80
-BOOT_TIMEOUT = 120
+BOOT_TIMEOUT = 300
 BOOT_POLL_INTERVAL = 5
 
 
@@ -31,8 +31,9 @@ def _api_url(host_ip: str) -> str:
 
 def wait_for_boot(host_ip: str, timeout: int = BOOT_TIMEOUT) -> bool:
     url = _api_url(host_ip)
-    client = httpx.Client(auth=(ROS_USER, ROS_PASS), timeout=5.0)
+    client = httpx.Client(auth=(ROS_USER, ROS_PASS), timeout=10.0)
     start = time.time()
+    last_error = None
     while time.time() - start < timeout:
         try:
             resp = client.get(f"{url}/system/resource")
@@ -41,12 +42,17 @@ def wait_for_boot(host_ip: str, timeout: int = BOOT_TIMEOUT) -> bool:
                 logger.info("RouterOS booted at %s (%.1fs)", host_ip, elapsed)
                 client.close()
                 return True
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout):
-            pass
+            else:
+                logger.debug("RouterOS at %s returned status %d", host_ip, resp.status_code)
+        except Exception as e:
+            last_error = e
+            elapsed = round(time.time() - start, 1)
+            logger.debug("Waiting for RouterOS at %s (%.1fs): %s", host_ip, elapsed, e)
         time.sleep(BOOT_POLL_INTERVAL)
     client.close()
+    error_detail = f" Last error: {last_error}" if last_error else ""
     raise RouterOSConnectionError(
-        f"RouterOS at {host_ip} did not boot within {timeout}s"
+        f"RouterOS at {host_ip} did not boot within {timeout}s.{error_detail}"
     )
 
 
