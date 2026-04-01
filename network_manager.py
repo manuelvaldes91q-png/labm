@@ -13,9 +13,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
+class ContainerNotFoundError(Exception):
+    pass
+
+
+class ContainerNotRunningError(Exception):
+    pass
+
+
+class VethCommandError(Exception):
+    pass
+
+
 def run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
     logger.debug("Running: %s", " ".join(cmd))
-    return subprocess.run(cmd, capture_output=True, text=True, check=check)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if check and result.returncode != 0:
+        raise VethCommandError(
+            f"Command failed ({result.returncode}): {' '.join(cmd)}\n"
+            f"stderr: {result.stderr.strip()}"
+        )
+    return result
 
 
 def get_container_pid(container_name: str) -> int:
@@ -23,12 +41,10 @@ def get_container_pid(container_name: str) -> int:
     try:
         container = client.containers.get(container_name)
     except docker.errors.NotFound:
-        logger.error("Container '%s' not found", container_name)
-        sys.exit(1)
+        raise ContainerNotFoundError(f"Container '{container_name}' not found")
     pid = container.attrs["State"]["Pid"]
     if pid == 0:
-        logger.error("Container '%s' is not running", container_name)
-        sys.exit(1)
+        raise ContainerNotRunningError(f"Container '{container_name}' is not running")
     return pid
 
 
