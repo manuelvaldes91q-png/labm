@@ -32,7 +32,7 @@ app.add_middleware(
 
 docker_client = docker.from_env()
 
-CHR_IMAGE = "evilfreelancer/docker-routeros:latest"
+CHR_IMAGE = "evilfreelancer/docker-routeros:6.49.17"
 PC_IMAGE = "alpine:latest"
 
 _winbox_counter = {"next": nm.WINBOX_PORT_BASE}
@@ -291,7 +291,7 @@ def create_node(req: CreateNodeRequest, background_tasks: BackgroundTasks):
         cmd = None
         winbox_port = _get_free_port(_winbox_counter["next"])
         _winbox_counter["next"] = winbox_port + 1
-        ports = {"8291/tcp": winbox_port, "80/tcp": None}
+        ports = {"8291/tcp": winbox_port, "8728/tcp": None}
     else:
         image = PC_IMAGE
         cmd = ["sh", "-c", "apk add --no-cache iputils curl iproute2 >/dev/null 2>&1; sleep infinity"]
